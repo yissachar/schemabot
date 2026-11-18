@@ -142,7 +142,8 @@ func (h *Handler) applyCommandCore(parent context.Context, repo string, pr int, 
 		return false, nil
 	}
 
-	if blocked, gateErr := h.enforceSharedSchemaIgnoreLists(ctx, client, repo, pr, installationID, environment, requestedBy, action.Apply, schemaResult, result.SuppressRetryComments); gateErr != nil {
+	sharedSchemaPeers, blocked, gateErr := h.enforceSharedSchemaIgnoreLists(ctx, client, repo, pr, installationID, environment, requestedBy, action.Apply, schemaResult, result.SuppressRetryComments)
+	if gateErr != nil {
 		return true, fmt.Errorf("apply command shared schema ignore_tables check %s#%d: %w", repo, pr, gateErr)
 	} else if blocked {
 		h.logger.Info("apply refused: ignore_tables disagree with a database sharing the same schema", "repo", repo, "pr", pr, "environment", environment, "database", schemaResult.Database, "requested_by", requestedBy)
@@ -327,7 +328,7 @@ func (h *Handler) applyCommandCore(parent context.Context, repo string, pr int, 
 	if rejected := h.assertSchemaStillCurrent(ctx, repo, pr, installationID, schemaResult, prInfo.HeadSHA, environment, requestedBy, action.Apply); rejected {
 		return false, nil
 	}
-	if rejected, gateErr := h.assertBaseSchemaStillCurrent(ctx, client, repo, pr, installationID, schemaResult, prInfo, environment, requestedBy, action.Apply); gateErr != nil {
+	if rejected, gateErr := h.assertBaseSchemaStillCurrent(ctx, client, repo, pr, installationID, schemaResult, sharedSchemaPeers, prInfo, environment, requestedBy, action.Apply); gateErr != nil {
 		return true, fmt.Errorf("apply command base schema freshness gate %s#%d: %w", repo, pr, gateErr)
 	} else if rejected {
 		return false, nil
@@ -750,7 +751,7 @@ func (h *Handler) applyCommandCore(parent context.Context, repo string, pr int, 
 	}
 
 	// Check 2 (DDL drift) happens inside executeApply after re-plan
-	h.executeApply(ctx, client, repo, pr, schemaResult, environment, installationID, requestedBy, result, storedPlan, storedPlan, planResp.PlanID, lock.DisclosedCopies)
+	h.executeApply(ctx, client, repo, pr, schemaResult, sharedSchemaPeers, environment, installationID, requestedBy, result, storedPlan, storedPlan, planResp.PlanID, lock.DisclosedCopies)
 	return false, nil
 }
 
@@ -907,7 +908,8 @@ func (h *Handler) applyConfirmCommandCore(parent context.Context, repo string, p
 		return false, nil
 	}
 
-	if blocked, gateErr := h.enforceSharedSchemaIgnoreLists(ctx, client, repo, pr, installationID, environment, requestedBy, action.ApplyConfirm, schemaResult, result.SuppressRetryComments); gateErr != nil {
+	sharedSchemaPeers, blocked, gateErr := h.enforceSharedSchemaIgnoreLists(ctx, client, repo, pr, installationID, environment, requestedBy, action.ApplyConfirm, schemaResult, result.SuppressRetryComments)
+	if gateErr != nil {
 		return true, fmt.Errorf("apply-confirm command shared schema ignore_tables check %s#%d: %w", repo, pr, gateErr)
 	} else if blocked {
 		h.logger.Info("apply-confirm refused: ignore_tables disagree with a database sharing the same schema", "repo", repo, "pr", pr, "environment", environment, "database", schemaResult.Database, "requested_by", requestedBy)
@@ -1007,7 +1009,7 @@ func (h *Handler) applyConfirmCommandCore(parent context.Context, repo string, p
 	// requires the lock, so releasing it would turn a transient GitHub read
 	// failure into a lost confirmation. Only a verified-stale rejection
 	// releases the observed intent.
-	if rejected, gateErr := h.assertBaseSchemaStillCurrent(ctx, client, repo, pr, installationID, schemaResult, confirmPRInfo, environment, requestedBy, action.ApplyConfirm); gateErr != nil {
+	if rejected, gateErr := h.assertBaseSchemaStillCurrent(ctx, client, repo, pr, installationID, schemaResult, sharedSchemaPeers, confirmPRInfo, environment, requestedBy, action.ApplyConfirm); gateErr != nil {
 		return true, fmt.Errorf("apply-confirm command base schema freshness gate %s#%d: %w", repo, pr, gateErr)
 	} else if rejected {
 		releaseObservedApplyIntent("base-schema freshness rejection")
@@ -1111,7 +1113,7 @@ func (h *Handler) applyConfirmCommandCore(parent context.Context, repo string, p
 
 	disclosedCopies := disclosureDescribesThisApply(existingLock, storedPlan, environment)
 
-	h.executeApply(ctx, client, repo, pr, schemaResult, environment, installationID, requestedBy, result, nil, storedPlan, existingLock.PendingPlanID, disclosedCopies)
+	h.executeApply(ctx, client, repo, pr, schemaResult, sharedSchemaPeers, environment, installationID, requestedBy, result, nil, storedPlan, existingLock.PendingPlanID, disclosedCopies)
 	return false, nil
 }
 
